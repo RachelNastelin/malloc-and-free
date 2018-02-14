@@ -54,6 +54,9 @@ void* xxmalloc(size_t size) {
     perror("mmap");
     exit(2);
   }
+
+  
+
   
   // Done with malloc, so clear this flag
   in_malloc = false;
