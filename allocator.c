@@ -35,6 +35,8 @@ HOW TO RUN THIS STUPID THING:
 bool in_malloc = false;           // Set whenever we are inside malloc.
 bool use_emergency_block = false; // If set, use the emergency space for allocations
 char emergency_block[1024];       // Emergency space for allocating to print errors
+
+
 typedef struct __attribute__((packed)) slot slot_t;
 typedef struct __attribute__((packed)) slot{
   slot_t * next_slot;
@@ -45,6 +47,7 @@ typedef struct __attribute__((packed)) header{
   void * next_block;
   slot_t * free_list;
 }header_t;
+
 
 /**
  * Allocate space on the heap.
@@ -87,18 +90,29 @@ void* xxmalloc(size_t size) {
     //Get a pointer to the next block
     void* p = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     //Put that pointer inside of focal_mem
+    // header_t * p = (header_t*)p;
+    //focal_mem[i-4] = (header_t*) p;
+    //*p = header_cur;
+    
     focal_mem[i-4] = p;
- 
+    focal_mem[i-4]->size = pow(2, i);
+    focal_mem[i-4]->next_block = NULL;
+    //focal_mem[i-4]->free_list =mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    focal_mem[i-4]->free_list->next_slot = p + (sizeof(header_t) + (header_cur.size - sizeof(header_t)));
+    
     //Make header
-    header_cur.size = pow(2, i);
-    header_cur.next_block = NULL;
-    header_cur.free_list = p + (sizeof(header_t) + (16 - sizeof(header_t)));
+    //header_cur.size = pow(2, i);
+    //header_cur.next_block = NULL;
+    //intptr_t address_p = (intptr_t)p;
+    //header_cur.free_list = (void*)(p + (sizeof(header_t)
+    // + (header_cur.size - sizeof(header_t))));
+    
   }//for
 
   /*splitting the block*/
   for(int i = 0; i < 8; i++){ //Loops through focal_mem
     slot_t* cur_slot = focal_mem[i]->free_list;
-    slot_t* cur_slot_end = cur_slot + focal_mem[i]->size;
+    slot_t* cur_slot_end = &cur_slot + focal_mem[i]->size;
 
     cur_slot->next_slot = cur_slot_end;
 
