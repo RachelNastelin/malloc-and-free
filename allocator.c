@@ -89,30 +89,18 @@ void* xxmalloc(size_t size) {
   for(int i =4; i < 12; i++){
     //Get a pointer to the next block
     void* p = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    //Put that pointer inside of focal_mem
-    // header_t * p = (header_t*)p;
-    //focal_mem[i-4] = (header_t*) p;
-    //*p = header_cur;
-    
     focal_mem[i-4] = p;
     focal_mem[i-4]->size = pow(2, i);
     focal_mem[i-4]->next_block = NULL;
-    //focal_mem[i-4]->free_list =mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    focal_mem[i-4]->free_list->next_slot = p + (sizeof(header_t) + (header_cur.size - sizeof(header_t)));
-    
-    //Make header
-    //header_cur.size = pow(2, i);
-    //header_cur.next_block = NULL;
-    //intptr_t address_p = (intptr_t)p;
-    //header_cur.free_list = (void*)(p + (sizeof(header_t)
-    // + (header_cur.size - sizeof(header_t))));
-    
+    focal_mem[i-4]->free_list = p + ROUND_UP(sizeof(header_t), focal_mem[i-4]->size);
+    //focal_mem[i-4]->free_list->next_slot = NULL;
+
   }//for
 
   /*splitting the block*/
   for(int i = 0; i < 8; i++){ //Loops through focal_mem
     slot_t* cur_slot = focal_mem[i]->free_list;
-    slot_t* cur_slot_end = &cur_slot + focal_mem[i]->size;
+    slot_t* cur_slot_end = cur_slot + focal_mem[i]->size;
 
     cur_slot->next_slot = cur_slot_end;
 
@@ -121,30 +109,28 @@ void* xxmalloc(size_t size) {
       cur_slot_end =  cur_slot + focal_mem[i]->size;
       cur_slot->next_slot = cur_slot_end;
     }//for j
-    //cur->next_slot = NULL;
+    //Make the last next_slot NULL
   }//for i
   
   /*Rounding*/
   int leading = __builtin_clzll(size); //Number of leading zeros
-  int round_up_ready = 64 - leading; /*The number of digits that aren't leading
-                                       zeros*/
-  int ret_size = pow(2, round_up_ready); //The size of the space you'll need
-
+  int trailing = __builtin_ctzll(size); //Number of leading zeros
+  int power = 0;
+  if(leading + trailing != 64){//There's more than 1 1 in the binary number
+    while(pow(2, power) < size){
+      power++;
+    }//while
+  }//if
+  int ret_size = pow(2, power); //The size of the space you'll need
   if(ret_size <= 16){ //If you need less than 16 bytes
     slot_t * tmp = focal_mem[0]->free_list;
     focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
     return &(*tmp);
   }//if
-  int index = 1;
   //while the rounded size is greater than cur slot size
-  while(ret_size >= focal_mem[index]->size){
-    //continue looking
-    index++;
-  }//while
-  /*You've found a slot big enough, so move the free list along and return the
-    next thing in the free list*/
-  slot_t * tmp = focal_mem[index]->free_list;
-  focal_mem[index]->free_list = focal_mem[index]->free_list->next_slot;
+ 
+  slot_t * tmp = focal_mem[power]->free_list;
+  focal_mem[power]->free_list = focal_mem[power]->free_list->next_slot;
   
   // Done with malloc, so clear this flag
   in_malloc = false;
@@ -157,19 +143,22 @@ void* xxmalloc(size_t size) {
  */
 void xxfree(void* ptr) {
   /*Get the size of the slot that ptr is in*/
-  int slot_size_so_far = 0;
-  intptr_t address = (intptr_t)ptr;
-  for(int i=4; pow(2,i) < address; i++){
-    slot_size_so_far = pow(2,i);
-  }//for
-  
-  
-  /*Go to the correct block for the slot size*/
-  
-  /*Get to the end of free_list in that block*/
-  slot_t * tmp;
- 
-  /*Set the last element's next to the node you're adding on*/
+  size_t slot_size = xxmalloc_usable_size(ptr);
+  /*Get to the correct place in focal_mem*/
+  int index = 0;
+  while(focal_mem[index]->size < slot_size){
+    index++;    
+  }
+  header_t ptr_freed_from = focal_mem[index];
+  /*Go through free_list*/
+  slot_t cur_slot = ptr_freed_from->free_list;
+  while(cur_slot->next != NULL){
+    cur_slot = cur_slot->next;
+  }//while
+  /*Put new memory at the end*/
+  intptr_t ptr_address = (intptr_t)ptr;
+  intptr_t address = ROUND_DOWN(ptr_address, slot_size);
+
 }
 
 /**
@@ -178,10 +167,12 @@ void xxfree(void* ptr) {
  * \returns     The number of bytes available for use in this object
  */
 size_t xxmalloc_usable_size(void* ptr) {
-  // We aren't tracking the size of allocated objects yet, so all we know is that it's at least PAGE_SIZE bytes.
-  //int rounded_size = ROUND_DOWN(ptr,PAGE_SIZE);
-  //return rounded_size;
-  return 16;
+  header_t * tmp = (header_t*)ptr;
+  intptr_t ptr_address = (intptr_t)ptr;
+  /*Round down to the next multiple of 4096, since that's the size of a block*/
+  tmp = ROUND_DOWN(ptr_address,4096);
+  /*Get to the header there and return its size field*/
+  return tmp->size;
 }
 
 /**Notes to self (DELETE THIS)
