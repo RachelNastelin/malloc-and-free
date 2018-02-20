@@ -35,7 +35,7 @@ HOW TO RUN THIS STUPID THING:
 bool in_malloc = false;           // Set whenever we are inside malloc.
 bool use_emergency_block = false; // If set, use the emergency space for allocations
 char emergency_block[1024];       // Emergency space for allocating to print errors
-
+header_t * focal_mem[8]; //Holds the variable-sized memory blocks
 
 typedef struct __attribute__((packed)) slot slot_t;
 typedef struct __attribute__((packed)) slot{
@@ -48,6 +48,56 @@ typedef struct __attribute__((packed)) header{
   slot_t * free_list;
 }header_t;
 
+header_t make_block(int size){
+  header_t* p = (header_t*) mmap(NULL,PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+  p-> size = size;
+  p->next_block = NULL;
+  p->free_list = p + ROUND_UP(sizeof(header_t),size);
+
+  
+  /*splitting the block*/
+  slot_t* cur_slot = p->free_list;
+  slot_t* next_slot = cur_slot + size;
+
+  cur_slot->next_slot = next_slot;
+
+  while(next_slot != NULL){ //Loops through slots in each block
+    cur_slot = next_slot;
+    next_slot =  cur_slot + size;
+    cur_slot->next_slot = next_slot;
+  }
+
+  cur_slot->next-slot = NULL;
+}
+//make_block
+
+
+helper_t * make_focal_mem(){
+ // Request memory from the operating system in page-sized chunks
+  void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+  // Check for errors
+  if(p == MAP_FAILED) {
+    use_emergency_block = true;
+    perror("mmap");
+    exit(2);
+  }
+  /*Storing 8 chunks of memory*/
+  
+  header_t header_cur;
+
+  for(int i =4; i < 12; i++){
+    //Get a pointer to the next block
+    void* p = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    focal_mem[i-4] = p;
+    focal_mem[i-4]->size = pow(2, i);
+    focal_mem[i-4]->next_block = NULL;
+    focal_mem[i-4]->free_list = p + ROUND_UP(sizeof(header_t), focal_mem[i-4]->size);
+  }//for
+  
+  return focal_mem;
+}//xxmalloc_helper
 
 /**
  * Allocate space on the heap.
@@ -65,76 +115,49 @@ void* xxmalloc(size_t size) {
     puts("ERROR! Nested call to malloc. Aborting.\n");
     exit(2);
   }
-  
+
   // If we call malloc again while this is true, bad things will happen.
   in_malloc = true;
-  
-  // Round the size up to the next multiple of the page size
-  size = ROUND_UP(size, PAGE_SIZE);
-  
-  // Request memory from the operating system in page-sized chunks
-  void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
-  // Check for errors
-  if(p == MAP_FAILED) {
-    use_emergency_block = true;
-    perror("mmap");
-    exit(2);
+  //In the case size is > 2048
+  if(size > 2048){
+    size = ROUND_UP(size, PAGE_SIZE);
+    void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    return p;
   }
-
-  /*Storing 8 chunks of memory*/
-  header_t * focal_mem[8]; //Holds the variable-sized memory blocks
-  header_t header_cur;
-
-  for(int i =4; i < 12; i++){
-    //Get a pointer to the next block
-    void* p = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    focal_mem[i-4] = p;
-    focal_mem[i-4]->size = pow(2, i);
-    focal_mem[i-4]->next_block = NULL;
-    focal_mem[i-4]->free_list = p + ROUND_UP(sizeof(header_t), focal_mem[i-4]->size);
-    //focal_mem[i-4]->free_list->next_slot = NULL;
-
-  }//for
-
-  /*splitting the block*/
-  for(int i = 0; i < 8; i++){ //Loops through focal_mem
-    slot_t* cur_slot = focal_mem[i]->free_list;
-    slot_t* cur_slot_end = cur_slot + focal_mem[i]->size;
-
-    cur_slot->next_slot = cur_slot_end;
-
-    for(int j = 0; cur_slot_end != NULL; j++){ //Loops through slots in each block
-      cur_slot = cur_slot_end;
-      cur_slot_end =  cur_slot + focal_mem[i]->size;
-      cur_slot->next_slot = cur_slot_end;
-    }//for j
-    //Make the last next_slot NULL
-  }//for i
   
+ 
   /*Rounding*/
   int leading = __builtin_clzll(size); //Number of leading zeros
   int trailing = __builtin_ctzll(size); //Number of leading zeros
-  int power = 0;
-  if(leading + trailing != 64){//There's more than 1 1 in the binary number
-    while(pow(2, power) < size){
-      power++;
-    }//while
-  }//if
-  int ret_size = pow(2, power); //The size of the space you'll need
-  if(ret_size <= 16){ //If you need less than 16 bytes
-    slot_t * tmp = focal_mem[0]->free_list;
-    focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
-    return &(*tmp);
-  }//if
-  //while the rounded size is greater than cur slot size
- 
-  slot_t * tmp = focal_mem[power]->free_list;
-  focal_mem[power]->free_list = focal_mem[power]->free_list->next_slot;
+  int index = 0;
   
-  // Done with malloc, so clear this flag
-  in_malloc = false;
-  return &(*tmp);
+  if(leading + trailing != 64){//There's more than 1 1 in the binary number
+
+    while(pow(2, (index+4)) < size){
+      index++;
+    }//while
+    
+  }//if
+  
+  int ret_size = pow(2, (index+4)); //The size of the space you'll need
+  
+  if(ret_size <= 16){ //If you need less than 16 bytes
+
+    if(focal_mem[index] == NULL){
+      focal_mem[index] = make_block(ret_size);
+    }
+    
+    slot_t* tmp = focal_mem[0]->free_list;
+    focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
+    
+    // Done with malloc, so clear this flag
+    in_malloc = false;
+    return &tmp;
+  }
+  
+  //If you need between 16 and 2048 bytes
+  
 }
 
 /**
@@ -180,3 +203,11 @@ size_t xxmalloc_usable_size(void* ptr) {
  * If you fill a block, add a new block
  * Switch back the thing in the makefile from O0 to O2 (there are two of them)
  */
+
+/*Do when you need a big object:  
+// Round the size up to the next multiple of the page size
+  // size = ROUND_UP(size, PAGE_SIZE);
+  
+  // Request memory from the operating system in page-sized chunks
+  void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+*/
