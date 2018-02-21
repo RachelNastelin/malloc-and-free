@@ -26,7 +26,7 @@ HOW TO RUN THIS STUPID THING:
 
 // Round a value x up to the next multiple of y
 #define ROUND_UP(x,y) ((x) % (y) == 0 ? (x) : (x) + ((y) - (x) % (y)))
-#define ROUND_DOWN(x,y) ((x) % (y) == 0 ? (x) : (x) - ((y) + (x) % (y)))
+#define ROUND_DOWN(x,y) ((x) % (y) == 0 ? (x) : ((x) - (x) % (y)))
 
 // The size of a single page of memory, in bytes
 #define PAGE_SIZE 0x1000
@@ -55,11 +55,13 @@ slot_t* return_ptr;
 
 header_t* make_block(int size){
   header_t* p = (header_t*) mmap(NULL,PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-
+  intptr_t free_list_ptr = (intptr_t) p;
+  free_list_ptr += ROUND_UP(sizeof(header_t),size);
+  
   p-> size = size;
   p->next_block = NULL;
-  p->free_list = (slot_t*) p + ROUND_UP(sizeof(header_t),size);
-
+  p->free_list = (slot_t*) free_list_ptr;
+ 
   
   /*splitting the block*/
   slot_t* cur_slot = p->free_list;
@@ -67,7 +69,9 @@ header_t* make_block(int size){
 
   cur_slot->next_slot = next_slot;
 
-  while(next_slot != NULL){ //Loops through slots in each block
+  int end = floor((PAGE_SIZE-sizeof(header_t))/ size);
+  
+  for(int i = 0; i < end; i++){ //Loops through slots in each block
     cur_slot = next_slot;
     next_slot =  cur_slot + size;
     cur_slot->next_slot = next_slot;
@@ -130,6 +134,7 @@ void* xxmalloc(size_t size) {
   if(size > 2048){
     size = ROUND_UP(size, PAGE_SIZE);
     void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    in_malloc = false;
     return p;
   }
   
@@ -171,28 +176,56 @@ void* xxmalloc(size_t size) {
       in_malloc = false; //ask about this
       return &return_ptr;
     }
-
+  }
 
   //If you need between 16 and 2048 bytes
   if(focal_mem[index] == NULL){
     focal_mem[index] = make_block(ret_size);
   }
 
-  if(focal_mem[index]->free_list == NULL){
-    header_t* last_block;
+  header_t* cur_block = focal_mem[index];
+  if(cur_block->free_list == NULL){
 
-    while(focal_mem[index]->next_block != NULL){
-      last_block = focal_mem[index]->next_block;
+    while(cur_block->next_block != NULL){
+      cur_block = cur_block->next_block;
+
+      if(cur_block->free_list != NULL){
+        return_ptr =cur_block->free_list;
+        cur_block->free_list = cur_block->free_list->next_slot;
+        
+        in_malloc = false;
+        return return_ptr;
+      }
     }
     
-    last_block->next_block = make_block(ret_size);
-    focal_mem[index]->free_list = last_block-> next_block-> free_list;
-  }
-  return_ptr = focal_mem[index]->free_list;
-  focal_mem[index]->free_list = focal_mem[index]->free_list->next_slot;
+    cur_block->next_block = make_block(ret_size);
+    cur_block->free_list = NULL;
+    return_ptr =cur_block->next_block->free_list;
     
-  in_malloc = false;
-  return &return_ptr;
+    in_malloc = false;
+    return return_ptr;
+    
+  }
+}
+
+
+
+  
+  /**
+   * Get the available size of an allocated object
+   * \param ptr   A pointer somewhere inside the allocated object
+   * \returns     The number of bytes available for use in this object
+   */
+size_t xxmalloc_usable_size(void* ptr) {
+  
+  header_t * tmp = (header_t*)ptr;
+  intptr_t ptr_address = (intptr_t)ptr;
+  
+  /*Round down to the next multiple of 4096, since that's the size of a block*/
+  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
+  
+  /*Get to the header there and return its size field*/
+  return tmp->size;
 }
 
 /**
@@ -202,47 +235,25 @@ void* xxmalloc(size_t size) {
 void xxfree(void* ptr) {
   /*Get the size of the slot that ptr is in*/
   size_t slot_size = xxmalloc_usable_size(ptr);
+  
   /*Get to the correct place in focal_mem*/
   int index = 0;
   while(focal_mem[index]->size < slot_size){
     index++;    
   }
-  header_t ptr_freed_from = focal_mem[index];
+
+  header_t* ptr_freed_from = focal_mem[index];
+
   /*Go through free_list*/
-  slot_t cur_slot = ptr_freed_from->free_list;
-  while(cur_slot->next != NULL){
-    cur_slot = cur_slot->next;
+  slot_t* cur_slot = ptr_freed_from->free_list;
+  while(cur_slot->next_slot != NULL){
+    cur_slot = cur_slot-> next_slot;
   }//while
+
   /*Put new memory at the end*/
   intptr_t ptr_address = (intptr_t)ptr;
   intptr_t address = ROUND_DOWN(ptr_address, slot_size);
 
 }
 
-/**
- * Get the available size of an allocated object
- * \param ptr   A pointer somewhere inside the allocated object
- * \returns     The number of bytes available for use in this object
- */
-size_t xxmalloc_usable_size(void* ptr) {
-  header_t * tmp = (header_t*)ptr;
-  intptr_t ptr_address = (intptr_t)ptr;
-  /*Round down to the next multiple of 4096, since that's the size of a block*/
-  tmp = ROUND_DOWN(ptr_address,4096);
-  /*Get to the header there and return its size field*/
-  return tmp->size;
-}
-
-/**Notes to self (DELETE THIS)
- * Didn't do the last paragraph of part B
- * If you fill a block, add a new block
- * Switch back the thing in the makefile from O0 to O2 (there are two of them)
- */
-
-/*Do when you need a big object:  
-// Round the size up to the next multiple of the page size
-  // size = ROUND_UP(size, PAGE_SIZE);
-  
-  // Request memory from the operating system in page-sized chunks
-  void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-*/
+// Switch back the thing in the makefile from O0 to O2 (there are two of them)
