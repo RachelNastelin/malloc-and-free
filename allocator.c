@@ -10,28 +10,28 @@
 #include <math.h>
 
 /*****************************************************************************
-Soooo this code is garbage. Just FYI. Prepare for seg faults. 
-
-HOW TO RUN THIS STUPID THING:
+HOW TO RUN:
 1. IN TERMINAL: make
 2. IN TERMINAL: gdb ls
 3. IN GDB: set environment LD_PRELOAD=./myallocator.so
 4. IN GDB: run
 
 (cite Pouya for helping with that)
+Cite Johnathan for helping debug xxmalloc with GDB
+Cite Medha and Mattori for helping with...everything
 ******************************************************************************/
 
-// The minimum size returned by malloc
+                                                      // The minimum size returned by malloc
 #define MIN_MALLOC_SIZE 16
 
-// Round a value x up to the next multiple of y
+                                                      // Round a value x up to the next multiple of y
 #define ROUND_UP(x,y) ((x) % (y) == 0 ? (x) : (x) + ((y) - (x) % (y)))
 #define ROUND_DOWN(x,y) ((x) % (y) == 0 ? (x) : ((x) - (x) % (y)))
 
-// The size of a single page of memory, in bytes
+                                                      // The size of a single page of memory, in bytes
 #define PAGE_SIZE 0x1000
 
-// USE ONLY IN CASE OF EMERGENCY
+                                                      // USE ONLY IN CASE OF EMERGENCY
 bool in_malloc = false;           // Set whenever we are inside malloc.
 bool use_emergency_block = false; // If set, use the emergency space for allocations
 char emergency_block[1024];       // Emergency space for allocating to print errors
@@ -56,9 +56,10 @@ slot_t* return_ptr;
 header_t* make_block(int size){
   header_t* p = (header_t*) mmap(NULL,PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   intptr_t free_list_ptr = (intptr_t) p;
+  if(size == 0){return NULL;}
   free_list_ptr += ROUND_UP(sizeof(header_t),size);
   
-  p-> size = size;
+  p->size = size;
   p->next_block = NULL;
   p->free_list = (slot_t*) free_list_ptr;
  
@@ -68,9 +69,9 @@ header_t* make_block(int size){
   slot_t* next_slot = cur_slot + size;
 
   cur_slot->next_slot = next_slot;
-
+  in_malloc = false;
   int end = floor((PAGE_SIZE-sizeof(header_t))/ size);
-  
+  in_malloc = true;
   for(int i = 0; i < end; i++){ //Loops through slots in each block
     cur_slot = next_slot;
     next_slot =  cur_slot + size;
@@ -81,34 +82,6 @@ header_t* make_block(int size){
 
   return p;
 }
-
-
-/*
-helper_t * make_focal_mem(){
- // Request memory from the operating system in page-sized chunks
-  void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-
-  // Check for errors
-  if(p == MAP_FAILED) {
-    use_emergency_block = true;
-    perror("mmap");
-    exit(2);
-  }
-
-  header_t header_cur;
-
-  for(int i =4; i < 12; i++){
-    //Get a pointer to the next block
-    void* p = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    focal_mem[i-4] = p;
-    focal_mem[i-4]->size = pow(2, i);
-    focal_mem[i-4]->next_block = NULL;
-    focal_mem[i-4]->free_list = p + ROUND_UP(sizeof(header_t), focal_mem[i-4]->size);
-  }//for
-  
-  return focal_mem;
-}//xxmalloc_helper
-*/
 
 /**
  * Allocate space on the heap.
@@ -124,6 +97,7 @@ void* xxmalloc(size_t size) {
   } else if(in_malloc) {
     use_emergency_block = true;
     puts("ERROR! Nested call to malloc. Aborting.\n");
+    
     exit(2);
   }
 
@@ -134,88 +108,113 @@ void* xxmalloc(size_t size) {
   if(size > 2048){
     size = ROUND_UP(size, PAGE_SIZE);
     void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
     in_malloc = false;
     return p;
   }
   
  
-  /*Rounding*/
-  int leading = __builtin_clzll(size); //Number of leading zeros
-  int trailing = __builtin_ctzll(size); //Number of leading zeros
+  /*Rounding
+    int leading = __builtin_clzll(size); //Number of leading zeros
+    int trailing = __builtin_ctzll(size); //Number of leading zeros
+  */
   int index = 0;
   
-  if(leading + trailing != 64){//There's more than 1 1 in the binary number
-
-    while(pow(2, (index+4)) < size){
-      index++;
-    }
+  //if((leading + trailing) != 63){//There's more than 1 1 in the binary number
+  while(1<<(index+4) < size){
+    index++;
   }
-  
-  int ret_size = pow(2, (index+4)); //The size of the space you'll need
-  
-  if(ret_size <= 16){ //If you need less than 16 bytes
+  //The size of the space you'll need
+  int ret_size = 1<<(index+4);
 
+  /*--------------IF YOU NEED LESS THAN 16 BYTES------------------------------------*/
+  if(ret_size <= 16){
+    //If there's no block for that size memory yet, make one
     if(focal_mem[index] == NULL){
       focal_mem[index] = make_block(ret_size);
-    }
-
+    }//if
+    
+    //If all the slots in the block have been given out
     if(focal_mem[index]->free_list == NULL){
-      header_t* last_block;
+      //Look for a block which has memory to give out
+      header_t* cur_block = focal_mem[index]; //Iterates through blocks
 
-      while(focal_mem[index]->next_block != NULL){
-        last_block = focal_mem[index]->next_block;
-      }
-    
-      last_block->next_block = make_block(ret_size);
-      focal_mem[index]->free_list = last_block-> next_block-> free_list;
-    
-      return_ptr = focal_mem[0]->free_list;
-      focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
-    
-      // Done with malloc, so clear this flag
-      in_malloc = false; //ask about this
-      return &return_ptr;
-    }
-  }
+      while(cur_block->next_block != NULL){
+        cur_block = cur_block->next_block;
 
-  //If you need between 16 and 2048 bytes
+        if(cur_block->free_list != NULL){ //You've found memory to give! Give it out.
+          return_ptr =cur_block->free_list;
+          cur_block->free_list = cur_block->free_list->next_slot;
+          in_malloc = false;
+          return return_ptr;
+        }//if 
+      }//while
+      
+      //You never found memory to give, so make a new block
+      cur_block->next_block = make_block(ret_size);
+      cur_block = cur_block->next_block;
+      return_ptr =cur_block->free_list;
+      cur_block->free_list = cur_block->free_list->next_slot;
+      in_malloc = false;
+      return return_ptr;
+    }//if the first free_list is empty
+    
+    //If the first free_list isn't empty
+    return_ptr = focal_mem[index]->free_list;
+    focal_mem[index]->free_list = focal_mem[index]->free_list->next_slot;
+    in_malloc = false;
+    return return_ptr;
+  }//if you need <= 16 bytes
+  
+  /*--------------IF YOU NEED 16-2048 BYTES------------------------------------*/
+  //If there aren't any blocks for that size memory yet, make one
   if(focal_mem[index] == NULL){
     focal_mem[index] = make_block(ret_size);
-  }
+  }//if
 
-  header_t* cur_block = focal_mem[index];
+  header_t* cur_block = focal_mem[index];//Iterates through blocks
+
+  //If the first free_list is empty
   if(cur_block->free_list == NULL){
-
+    
+    //Look for a free_list that has memory left
     while(cur_block->next_block != NULL){
       cur_block = cur_block->next_block;
-
+      
+      //If you found some memory, give it out! 
       if(cur_block->free_list != NULL){
         return_ptr =cur_block->free_list;
         cur_block->free_list = cur_block->free_list->next_slot;
         
         in_malloc = false;
         return return_ptr;
-      }
-    }
-    
+      }//if the current block's free_list was empty
+    }//while
+
+    //You hit a null block and never found a nonempty free_list, so make a new block
     cur_block->next_block = make_block(ret_size);
-    cur_block->free_list = NULL;
-    return_ptr =cur_block->next_block->free_list;
-    
+    cur_block = cur_block->next_block;
+    return_ptr =cur_block->free_list;
+    cur_block->free_list = cur_block->free_list->next_slot;
     in_malloc = false;
     return return_ptr;
-    
-  }
-}
+  }//if the free_list was empty
+
+  //If the free list wasn't empty
+  return_ptr =cur_block->free_list;
+  cur_block->free_list = cur_block->free_list->next_slot;
+  in_malloc = false;
+  return return_ptr;
+}//xxmalloc
 
 
 
   
-  /**
-   * Get the available size of an allocated object
-   * \param ptr   A pointer somewhere inside the allocated object
-   * \returns     The number of bytes available for use in this object
-   */
+/**
+ * Get the available size of an allocated object
+ * \param ptr   A pointer somewhere inside the allocated object
+ * \returns     The number of bytes available for use in this object
+ */
 size_t xxmalloc_usable_size(void* ptr) {
   
   header_t * tmp = (header_t*)ptr;
