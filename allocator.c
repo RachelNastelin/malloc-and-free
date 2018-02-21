@@ -35,25 +35,30 @@ HOW TO RUN THIS STUPID THING:
 bool in_malloc = false;           // Set whenever we are inside malloc.
 bool use_emergency_block = false; // If set, use the emergency space for allocations
 char emergency_block[1024];       // Emergency space for allocating to print errors
-header_t * focal_mem[8]; //Holds the variable-sized memory blocks
+
 
 typedef struct __attribute__((packed)) slot slot_t;
 typedef struct __attribute__((packed)) slot{
   slot_t * next_slot;
 }slot_t;
 
+typedef struct __attribute__((packed)) header header_t;
 typedef struct __attribute__((packed)) header{
   size_t size;
-  void * next_block;
+  header_t* next_block;
   slot_t * free_list;
 }header_t;
 
-header_t make_block(int size){
+
+header_t * focal_mem[8]; //Holds the variable-sized memory blocks
+slot_t* return_ptr;
+
+header_t* make_block(int size){
   header_t* p = (header_t*) mmap(NULL,PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
   p-> size = size;
   p->next_block = NULL;
-  p->free_list = p + ROUND_UP(sizeof(header_t),size);
+  p->free_list = (slot_t*) p + ROUND_UP(sizeof(header_t),size);
 
   
   /*splitting the block*/
@@ -68,11 +73,13 @@ header_t make_block(int size){
     cur_slot->next_slot = next_slot;
   }
 
-  cur_slot->next-slot = NULL;
+  cur_slot->next_slot = NULL;
+
+  return p;
 }
-//make_block
 
 
+/*
 helper_t * make_focal_mem(){
  // Request memory from the operating system in page-sized chunks
   void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
@@ -83,8 +90,7 @@ helper_t * make_focal_mem(){
     perror("mmap");
     exit(2);
   }
-  /*Storing 8 chunks of memory*/
-  
+
   header_t header_cur;
 
   for(int i =4; i < 12; i++){
@@ -98,6 +104,7 @@ helper_t * make_focal_mem(){
   
   return focal_mem;
 }//xxmalloc_helper
+*/
 
 /**
  * Allocate space on the heap.
@@ -136,9 +143,8 @@ void* xxmalloc(size_t size) {
 
     while(pow(2, (index+4)) < size){
       index++;
-    }//while
-    
-  }//if
+    }
+  }
   
   int ret_size = pow(2, (index+4)); //The size of the space you'll need
   
@@ -147,17 +153,46 @@ void* xxmalloc(size_t size) {
     if(focal_mem[index] == NULL){
       focal_mem[index] = make_block(ret_size);
     }
+
+    if(focal_mem[index]->free_list == NULL){
+      header_t* last_block;
+
+      while(focal_mem[index]->next_block != NULL){
+        last_block = focal_mem[index]->next_block;
+      }
     
-    slot_t* tmp = focal_mem[0]->free_list;
-    focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
+      last_block->next_block = make_block(ret_size);
+      focal_mem[index]->free_list = last_block-> next_block-> free_list;
     
-    // Done with malloc, so clear this flag
-    in_malloc = false;
-    return &tmp;
-  }
-  
+      return_ptr = focal_mem[0]->free_list;
+      focal_mem[0]->free_list = focal_mem[0]->free_list->next_slot;
+    
+      // Done with malloc, so clear this flag
+      in_malloc = false; //ask about this
+      return &return_ptr;
+    }
+
+
   //If you need between 16 and 2048 bytes
-  
+  if(focal_mem[index] == NULL){
+    focal_mem[index] = make_block(ret_size);
+  }
+
+  if(focal_mem[index]->free_list == NULL){
+    header_t* last_block;
+
+    while(focal_mem[index]->next_block != NULL){
+      last_block = focal_mem[index]->next_block;
+    }
+    
+    last_block->next_block = make_block(ret_size);
+    focal_mem[index]->free_list = last_block-> next_block-> free_list;
+  }
+  return_ptr = focal_mem[index]->free_list;
+  focal_mem[index]->free_list = focal_mem[index]->free_list->next_slot;
+    
+  in_malloc = false;
+  return &return_ptr;
 }
 
 /**
