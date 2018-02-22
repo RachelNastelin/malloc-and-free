@@ -16,9 +16,15 @@ HOW TO RUN:
 3. IN GDB: set environment LD_PRELOAD=./myallocator.so
 4. IN GDB: run
 
-(cite Pouya for helping with that)
-Cite Johnathan for helping debug xxmalloc with GDB
+CITATIONS: 
+Cite Pouya for helping with running in gdb
+Cite Johnathan for helping debug xxmalloc with GDB and helping debug our xxfree 
+             implementation
 Cite Medha and Mattori for helping with...everything
+
+REMEMBER TO:
+Switch back the thing in the makefile from O0 to O2 (there are two of them)
+Delete the printfs you added in grader.c 
 ******************************************************************************/
 
                                                       // The minimum size returned by malloc
@@ -26,7 +32,7 @@ Cite Medha and Mattori for helping with...everything
 
                                                       // Round a value x up to the next multiple of y
 #define ROUND_UP(x,y) ((x) % (y) == 0 ? (x) : (x) + ((y) - (x) % (y)))
-#define ROUND_DOWN(x,y) ((x) % (y) == 0 ? (x) : ((x) - (x) % (y)))
+#define ROUND_DOWN(x,y) ((x) - ((x) % (y)))
 
                                                       // The size of a single page of memory, in bytes
 #define PAGE_SIZE 0x1000
@@ -68,11 +74,11 @@ header_t* make_block(size_t ret_size){
  
   
   /*splitting the block*/
-  slot_t* cur_slot = p->free_list;
-  //intptr_t cur_slot_ptr = (intptr_t) cur_slot;
-  //intptr_t next_slot_ptr = cur_slot_ptr + (intptr_t)ret_size;
-  //slot_t* next_slot = (slot_t*) next_slot_ptr;
-  slot_t* next_slot = cur_slot + ret_size;
+   slot_t* cur_slot = p->free_list;
+  intptr_t cur_slot_ptr = (intptr_t) cur_slot;
+  intptr_t next_slot_ptr = cur_slot_ptr + (intptr_t)ret_size;
+  slot_t* next_slot = (slot_t*) next_slot_ptr;
+  // slot_t* next_slot = cur_slot + ret_size;
 
 
   /*Setting the next_slot field for each slot*/
@@ -82,7 +88,8 @@ header_t* make_block(size_t ret_size){
   
   for(int i = 0; i < end - 1; i++){ //Loops through slots in each block
     cur_slot = next_slot;
-    next_slot =  cur_slot + (intptr_t)ret_size; //could be initializing slots incorrectly
+    next_slot =  (slot_t*)((intptr_t)cur_slot + (intptr_t)ret_size); //could be initializing slots incorrectly
+    
     cur_slot->next_slot = next_slot;
   }
 
@@ -121,20 +128,15 @@ void* xxmalloc(size_t size) {
     return p;
   }
  
-  /*Rounding
-    int leading = __builtin_clzll(size); //Number of leading zeros
-    int trailing = __builtin_ctzll(size); //Number of leading zeros
-  */
   int index = 0;
-  
-  //if((leading + trailing) != 63){//There's more than 1 1 in the binary number
   while((1<<(index+4)) < size){
     index++;
   }
+  
   //The size of the space you'll need
   int ret_size = 1<<(index+4);
 
-  /*--------------IF YOU NEED LESS THAN 16 BYTES------------------------------*/
+  /*--------------IF YOU NEED 16 BYTES------------------------------*/
   if(ret_size <= 16){
     //If there's no block for that size memory yet, make one
     if(focal_mem[index] == NULL){
@@ -223,11 +225,11 @@ void* xxmalloc(size_t size) {
  */
 size_t xxmalloc_usable_size(void* ptr) {
   
-  header_t * tmp = (header_t*)ptr;
+
   intptr_t ptr_address = (intptr_t)ptr;
   
   /*Round down to the next multiple of 4096, since that's the size of a block*/
-  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
+  header_t * tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
   
   /*Get to the header there and return its size field*/
   return tmp->size;
@@ -246,29 +248,40 @@ void xxfree(void* ptr) {
   
   /*Get to the correct place in focal_mem*/
   int index = 0;
-
+  //If there are any null blocks at the start, skip them
   while(focal_mem[index] == NULL){
     index++;
   }
-  
+  //Go to the block with the right size memory
   while(focal_mem[index]->size < slot_size){
     index++;
-
+    //If there are any more null blocks, skip them
     while(focal_mem[index] == NULL){
       index++;
-    }
-  }
-  
-  header_t* ptr_freed_from = focal_mem[index];
+    }//while
+  }//while
+     header_t *  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
+
+  header_t* ptr_freed_from = focal_mem[index]; //The block that the memory was freed from
 
   /*Go through free_list*/
   header_t* cur_header = ptr_freed_from; ///cannot access memory of cur_slot
   slot_t* cur_slot = cur_header->free_list;
-  while(cur_slot != NULL){
-    cur_slot = cur_slot ->next_slot;
-    
-  }//while0
-
+  if(cur_slot != NULL){
+    while(cur_slot->next_slot != NULL){
+      cur_slot = cur_slot->next_slot;
+    }//while
+  }else{
+    while(cur_slot == NULL){
+      if(cur_header->next_block != NULL){
+        cur_header = cur_header->next_block;
+        cur_slot = cur_header->free_list;
+      }else{
+        cur_header->next_block = make_block(slot_size);
+      }//else
+    }//while
+  }//else
+ 
   /*Put new memory at the end*/
   intptr_t ptr_address = (intptr_t)ptr;
   intptr_t address = ROUND_DOWN(ptr_address, slot_size);
@@ -278,5 +291,8 @@ void xxfree(void* ptr) {
   cur_slot->next_slot = to_add;
 }
 
-// Switch back the thing in the makefile from O0 to O2 (there are two of them)
-// Delete the printfs you added in grader.c 
+/*
+  Don't go to the end of free_list in free. Put it in the free_list in the block you're 
+  already in because you know that's the right block already, assuming you're using the 
+  block that ROUND_DOWN returns. 
+*/
