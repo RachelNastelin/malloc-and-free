@@ -80,9 +80,9 @@ header_t* make_block(size_t ret_size){
   
   int end = floor((PAGE_SIZE-sizeof(header_t))/ ret_size);
   
-  for(int i = 0; i < end; i++){ //Loops through slots in each block
+  for(int i = 0; i < end - 1; i++){ //Loops through slots in each block
     cur_slot = next_slot;
-    next_slot =  cur_slot + (intptr_t)ret_size;
+    next_slot =  cur_slot + (intptr_t)ret_size; //could be initializing slots incorrectly
     cur_slot->next_slot = next_slot;
   }
 
@@ -246,17 +246,28 @@ void xxfree(void* ptr) {
   
   /*Get to the correct place in focal_mem*/
   int index = 0;
+
+  while(focal_mem[index] == NULL){
+    index++;
+  }
+  
   while(focal_mem[index]->size < slot_size){
-    index++;    
+    index++;
+
+    while(focal_mem[index] == NULL){
+      index++;
+    }
   }
   
   header_t* ptr_freed_from = focal_mem[index];
 
   /*Go through free_list*/
-  slot_t* cur_slot = ptr_freed_from->free_list;
-  while(cur_slot->next_slot != NULL){
-    cur_slot = cur_slot-> next_slot;
-  }//while
+  header_t* cur_header = ptr_freed_from; ///cannot access memory of cur_slot
+  slot_t* cur_slot = cur_header->free_list;
+  while(cur_slot != NULL){
+    cur_slot = cur_slot ->next_slot;
+    
+  }//while0
 
   /*Put new memory at the end*/
   intptr_t ptr_address = (intptr_t)ptr;
