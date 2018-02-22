@@ -53,28 +53,36 @@ typedef struct __attribute__((packed)) header{
 header_t * focal_mem[8]; //Holds the variable-sized memory blocks
 slot_t* return_ptr;
 
-header_t* make_block(int size){
+header_t* make_block(size_t ret_size){
   header_t* p = (header_t*) mmap(NULL,PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  intptr_t free_list_ptr = (intptr_t) p;
-  if(size == 0){return NULL;}
-  free_list_ptr += ROUND_UP(sizeof(header_t),size);
   
-  p->size = size;
+  intptr_t free_list_ptr = (intptr_t) p;
+
+  if(ret_size == 0){return NULL;}
+  free_list_ptr += ROUND_UP(sizeof(header_t),ret_size);
+
+  /*Initializing the block*/
+  p->size = ret_size;
   p->next_block = NULL;
-  p->free_list = (slot_t*) free_list_ptr;
+  p->free_list = (slot_t*) free_list_ptr; //*****
  
   
   /*splitting the block*/
   slot_t* cur_slot = p->free_list;
-  slot_t* next_slot = cur_slot + size;
+  //intptr_t cur_slot_ptr = (intptr_t) cur_slot;
+  //intptr_t next_slot_ptr = cur_slot_ptr + (intptr_t)ret_size;
+  //slot_t* next_slot = (slot_t*) next_slot_ptr;
+  slot_t* next_slot = cur_slot + ret_size;
 
+
+  /*Setting the next_slot field for each slot*/
   cur_slot->next_slot = next_slot;
-  in_malloc = false;
-  int end = floor((PAGE_SIZE-sizeof(header_t))/ size);
-  in_malloc = true;
+  
+  int end = floor((PAGE_SIZE-sizeof(header_t))/ ret_size);
+  
   for(int i = 0; i < end; i++){ //Loops through slots in each block
     cur_slot = next_slot;
-    next_slot =  cur_slot + size;
+    next_slot =  cur_slot + (intptr_t)ret_size;
     cur_slot->next_slot = next_slot;
   }
 
@@ -112,7 +120,6 @@ void* xxmalloc(size_t size) {
     in_malloc = false;
     return p;
   }
-  
  
   /*Rounding
     int leading = __builtin_clzll(size); //Number of leading zeros
@@ -121,13 +128,13 @@ void* xxmalloc(size_t size) {
   int index = 0;
   
   //if((leading + trailing) != 63){//There's more than 1 1 in the binary number
-  while(1<<(index+4) < size){
+  while((1<<(index+4)) < size){
     index++;
   }
   //The size of the space you'll need
   int ret_size = 1<<(index+4);
 
-  /*--------------IF YOU NEED LESS THAN 16 BYTES------------------------------------*/
+  /*--------------IF YOU NEED LESS THAN 16 BYTES------------------------------*/
   if(ret_size <= 16){
     //If there's no block for that size memory yet, make one
     if(focal_mem[index] == NULL){
@@ -166,16 +173,18 @@ void* xxmalloc(size_t size) {
     return return_ptr;
   }//if you need <= 16 bytes
   
-  /*--------------IF YOU NEED 16-2048 BYTES------------------------------------*/
+  /*--------------IF YOU NEED 16-2048 BYTES-----------------------------------*/
   //If there aren't any blocks for that size memory yet, make one
   if(focal_mem[index] == NULL){
     focal_mem[index] = make_block(ret_size);
+    
   }//if
 
   header_t* cur_block = focal_mem[index];//Iterates through blocks
-
+  //memory address of focal_mem[index] != cur_block
+  
   //If the first free_list is empty
-  if(cur_block->free_list == NULL){
+  if(cur_block->free_list == NULL){ //*********
     
     //Look for a free_list that has memory left
     while(cur_block->next_block != NULL){
@@ -206,9 +215,6 @@ void* xxmalloc(size_t size) {
   in_malloc = false;
   return return_ptr;
 }//xxmalloc
-
-
-
   
 /**
  * Get the available size of an allocated object
@@ -232,6 +238,9 @@ size_t xxmalloc_usable_size(void* ptr) {
  * \param ptr   A pointer somewhere inside the object that is being freed
  */
 void xxfree(void* ptr) {
+
+  if(ptr == NULL){return;}
+  
   /*Get the size of the slot that ptr is in*/
   size_t slot_size = xxmalloc_usable_size(ptr);
   
@@ -240,7 +249,7 @@ void xxfree(void* ptr) {
   while(focal_mem[index]->size < slot_size){
     index++;    
   }
-
+  
   header_t* ptr_freed_from = focal_mem[index];
 
   /*Go through free_list*/
@@ -253,6 +262,10 @@ void xxfree(void* ptr) {
   intptr_t ptr_address = (intptr_t)ptr;
   intptr_t address = ROUND_DOWN(ptr_address, slot_size);
 
+  slot_t * to_add = (slot_t*)address;
+  to_add->next_slot = NULL;
+  cur_slot->next_slot = to_add;
 }
 
 // Switch back the thing in the makefile from O0 to O2 (there are two of them)
+// Delete the printfs you added in grader.c 
