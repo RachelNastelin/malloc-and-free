@@ -3,8 +3,8 @@ CC  := gcc
 CXX := g++
 
 # Default flags
-CFLAGS   ?= -g -O0 --std=c99 -fPIC -Wall
-CXXFLAGS ?= -g -O0 -fPIC
+CFLAGS   ?= -g -O2 --std=c99 -fPIC -Wall
+CXXFLAGS ?= -g -O2 -fPIC
 LDFLAGS  += $(addprefix -l,$(LIBS))
 
 # Default source and object files
