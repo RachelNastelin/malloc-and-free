@@ -21,23 +21,24 @@ Cite Pouya for helping with running in gdb
 Cite Johnathan for helping debug xxmalloc with GDB and helping debug our xxfree 
              implementation
 Cite Medha and Mattori for helping with...everything
+Cite Alissa for helping debug xxfree
 
 REMEMBER TO:
 Switch back the thing in the makefile from O0 to O2 (there are two of them)
 Delete the printfs you added in grader.c 
 ******************************************************************************/
 
-                                                      // The minimum size returned by malloc
+// The minimum size returned by malloc
 #define MIN_MALLOC_SIZE 16
 
-                                                      // Round a value x up to the next multiple of y
+// Round a value x up to the next multiple of y
 #define ROUND_UP(x,y) ((x) % (y) == 0 ? (x) : (x) + ((y) - (x) % (y)))
 #define ROUND_DOWN(x,y) ((x) - ((x) % (y)))
 
-                                                      // The size of a single page of memory, in bytes
+// The size of a single page of memory, in bytes. (It's 4096)
 #define PAGE_SIZE 0x1000
 
-                                                      // USE ONLY IN CASE OF EMERGENCY
+// USE ONLY IN CASE OF EMERGENCY
 bool in_malloc = false;           // Set whenever we are inside malloc.
 bool use_emergency_block = false; // If set, use the emergency space for allocations
 char emergency_block[1024];       // Emergency space for allocating to print errors
@@ -74,7 +75,7 @@ header_t* make_block(size_t ret_size){
  
   
   /*splitting the block*/
-   slot_t* cur_slot = p->free_list;
+  slot_t* cur_slot = p->free_list;
   intptr_t cur_slot_ptr = (intptr_t) cur_slot;
   intptr_t next_slot_ptr = cur_slot_ptr + (intptr_t)ret_size;
   slot_t* next_slot = (slot_t*) next_slot_ptr;
@@ -137,7 +138,7 @@ void* xxmalloc(size_t size) {
   int ret_size = 1<<(index+4);
 
   /*--------------IF YOU NEED 16 BYTES------------------------------*/
-  if(ret_size <= 16){
+  if(ret_size == 16){
     //If there's no block for that size memory yet, make one
     if(focal_mem[index] == NULL){
       focal_mem[index] = make_block(ret_size);
@@ -179,7 +180,6 @@ void* xxmalloc(size_t size) {
   //If there aren't any blocks for that size memory yet, make one
   if(focal_mem[index] == NULL){
     focal_mem[index] = make_block(ret_size);
-    
   }//if
 
   header_t* cur_block = focal_mem[index];//Iterates through blocks
@@ -260,39 +260,61 @@ void xxfree(void* ptr) {
       index++;
     }//while
   }//while
-     header_t *  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
-
-  header_t* ptr_freed_from = focal_mem[index]; //The block that the memory was freed from
-
-  /*Go through free_list*/
-  header_t* cur_header = ptr_freed_from; ///cannot access memory of cur_slot
-  slot_t* cur_slot = cur_header->free_list;
-  if(cur_slot != NULL){
-    while(cur_slot->next_slot != NULL){
-      cur_slot = cur_slot->next_slot;
-    }//while
-  }else{
-    while(cur_slot == NULL){
-      if(cur_header->next_block != NULL){
-        cur_header = cur_header->next_block;
-        cur_slot = cur_header->free_list;
-      }else{
-        cur_header->next_block = make_block(slot_size);
-      }//else
-    }//while
-  }//else
- 
-  /*Put new memory at the end*/
   intptr_t ptr_address = (intptr_t)ptr;
-  intptr_t address = ROUND_DOWN(ptr_address, slot_size);
+  header_t *  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
 
-  slot_t * to_add = (slot_t*)address;
-  to_add->next_slot = NULL;
-  cur_slot->next_slot = to_add;
+  int end = floor((PAGE_SIZE-sizeof(header_t))/ slot_size);///////////////////////////
+  int slots_travelled = 0;////////////////////////////////////////////////////////////
+  
+  /*Get to the end of the free_list*/
+  slot_t * cur_slot = tmp->free_list; 
+  while(cur_slot != NULL){
+    slots_travelled++;
+    ////////////////////////////////////////////////////////////////(referring to slots_travelled++)
+    if(cur_slot->next_slot != NULL){
+      cur_slot = cur_slot->next_slot;
+    }//if
+    else { break; }
+  }//while
+
+  /*Make a new slot*/
+  slot_t * new_slot = {NULL};
+  //new_slot->next_slot = NULL;
+  cur_slot->next_slot = new_slot; //seg faults because of case where tmp->free_list = NULL, so cur_slot = NULL
 }
 
 /*
-  Don't go to the end of free_list in free. Put it in the free_list in the block you're 
+  Don't go to the last block in free. Put it in the free_list in the block you're 
   already in because you know that's the right block already, assuming you're using the 
   block that ROUND_DOWN returns. 
 */
+////////////////////////////////////////////////////stuff to delete when done debugging
+
+
+
+//OLD FREE
+  /*Go through free_list
+  // header_t* cur_header = ptr_freed_from; ///cannot access memory of cur_slot
+  slot_t* cur_slot = cur_header->free_list;
+  if(cur_slot != NULL){
+  while(cur_slot->next_slot != NULL){
+  cur_slot = cur_slot->next_slot;
+  }//while
+  }else{
+  while(cur_slot == NULL){
+  if(cur_header->next_block != NULL){
+  cur_header = cur_header->next_block;
+  cur_slot = cur_header->free_list;
+  }else{
+  cur_header->next_block = make_block(slot_size);
+  }//else
+  }//while
+  }//else
+  */
+  /*Put new memory at the end
+  // intptr_t ptr_address = (intptr_t)ptr;
+  intptr_t address = ROUND_DOWN((intptr_t)ptr, slot_size);
+
+  slot_t * to_add = (slot_t*)address;
+  to_add->next_slot = NULL;
+  cur_slot->next_slot = to_add;*/
