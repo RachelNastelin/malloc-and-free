@@ -262,15 +262,11 @@ void xxfree(void* ptr) {
   }//while
   intptr_t ptr_address = (intptr_t)ptr;
   header_t *  tmp = (header_t*) ROUND_DOWN(ptr_address,4096);
+  slot_t * tmp_slot = (slot_t *) ROUND_DOWN(ptr_address,tmp->size);
 
-  int end = floor((PAGE_SIZE-sizeof(header_t))/ slot_size);///////////////////////////
-  int slots_travelled = 0;////////////////////////////////////////////////////////////
-  
   /*Get to the end of the free_list*/
   slot_t * cur_slot = tmp->free_list; 
   while(cur_slot != NULL){
-    slots_travelled++;
-    ////////////////////////////////////////////////////////////////(referring to slots_travelled++)
     if(cur_slot->next_slot != NULL){
       cur_slot = cur_slot->next_slot;
     }//if
@@ -280,7 +276,11 @@ void xxfree(void* ptr) {
   /*Make a new slot*/
   slot_t * new_slot = {NULL};
   //new_slot->next_slot = NULL;
-  cur_slot->next_slot = new_slot; //seg faults because of case where tmp->free_list = NULL, so cur_slot = NULL
+  if(cur_slot == NULL){
+    cur_slot = new_slot;
+    return;
+  }
+  cur_slot->next_slot = new_slot; 
 }
 
 /*
